@@ -23,6 +23,8 @@ const long long max_size = 2000;         // max length of strings
 const long long N = 1;                   // number of closest words
 const long long max_w = 50;              // max length of vocabulary entries
 
+// 这个max_w跟max_size什么区别？
+
 int main(int argc, char **argv)
 {
   FILE *f;
@@ -31,11 +33,15 @@ int main(int argc, char **argv)
   long long words, size, a, b, c, d, b1, b2, b3, threshold = 0;
   float *M;
   char *vocab;
-  int TCN, CCN = 0, TACN = 0, CACN = 0, SECN = 0, SYCN = 0, SEAC = 0, SYAC = 0, QID = 0, TQ = 0, TQS = 0;
+  int TCN, CCN = 0, TACN = 0, CACN = 0, SECN = 0, SYCN = 0, SEAC = 0, SYAC = 0, QID = 0, TQ = 0, TQS = 0; //这一堆是什么意思啊？
   if (argc < 2) {
     printf("Usage: ./compute-accuracy <FILE> <threshold>\nwhere FILE contains word projections, and threshold is used to reduce vocabulary of the model for fast approximate evaluation (0 = off, otherwise typical value is 30000)\n");
     return 0;
   }
+  int i;
+  for(i=0; i<argc; i++) printf("%s\n",argv[i]);
+
+  // 1. 读取 word到vocab，读取vector到M
   strcpy(file_name, argv[1]);
   if (argc > 2) threshold = atoi(argv[2]);
   f = fopen(file_name, "rb");
@@ -46,8 +52,8 @@ int main(int argc, char **argv)
   fscanf(f, "%lld", &words);
   if (threshold) if (words > threshold) words = threshold;
   fscanf(f, "%lld", &size);
-  vocab = (char *)malloc(words * max_w * sizeof(char));
-  M = (float *)malloc(words * size * sizeof(float));
+  vocab = (char *)malloc(words * max_w * sizeof(char)); //一维指针，申请空间后，每个位置都是"\0",不因该是不确定的数值吗？
+  M = (float *)malloc(words * size * sizeof(float)); // 一维指针，申请空间后，每个位置都是0
   if (M == NULL) {
     printf("Cannot allocate memory: %lld MB\n", words * size * sizeof(float) / 1048576);
     return -1;
@@ -57,37 +63,43 @@ int main(int argc, char **argv)
     while (1) {
       vocab[b * max_w + a] = fgetc(f);
       if (feof(f) || (vocab[b * max_w + a] == ' ')) break;
-      if ((a < max_w) && (vocab[b * max_w + a] != '\n')) a++;
+      if ((a < max_w) && (vocab[b * max_w + a] != '\n')) a++; //没有超长，且不是换行符，算做有效
     }
-    vocab[b * max_w + a] = 0;
+    //printf("%s\n", &vocab[b * max_w]);  //等价与 printf("%s\n", vocab+b * max_w)
+    vocab[b * max_w + a] = 0; //这个位置本身就是"\0"的，只是为了保险起见，再设置一下
     for (a = 0; a < max_w; a++) vocab[b * max_w + a] = toupper(vocab[b * max_w + a]);
-    for (a = 0; a < size; a++) fread(&M[a + b * size], sizeof(float), 1, f);
+    for (a = 0; a < size; a++) fread(&M[a + b * size], sizeof(float), 1, f); //读取vector到M
     len = 0;
-    for (a = 0; a < size; a++) len += M[a + b * size] * M[a + b * size];
+    for (a = 0; a < size; a++) len += M[a + b * size] * M[a + b * size];  // 归一化
     len = sqrt(len);
     for (a = 0; a < size; a++) M[a + b * size] /= len;
   }
   fclose(f);
-  TCN = 0;
+
+  // 读取测试文件
+  TCN = 0;  //四元组的数目（词典中能够查找到的）
   while (1) {
     for (a = 0; a < N; a++) bestd[a] = 0;
     for (a = 0; a < N; a++) bestw[a][0] = 0;
-    scanf("%s", st1);
+    scanf("%s", st1);  // 参数中< 表示从文件中获取输入流，很好
     for (a = 0; a < strlen(st1); a++) st1[a] = toupper(st1[a]);
+    // 读取类别
     if ((!strcmp(st1, ":")) || (!strcmp(st1, "EXIT")) || feof(stdin)) {
-      if (TCN == 0) TCN = 1;
+      if (TCN == 0) TCN = 1; //输出结果，并进行重置，进入下一轮统计：
       if (QID != 0) {
         printf("ACCURACY TOP1: %.2f %%  (%d / %d)\n", CCN / (float)TCN * 100, CCN, TCN);
         printf("Total accuracy: %.2f %%   Semantic accuracy: %.2f %%   Syntactic accuracy: %.2f %% \n", CACN / (float)TACN * 100, SEAC / (float)SECN * 100, SYAC / (float)SYCN * 100);
       }
-      QID++;
+      QID++;  //新一轮开始，计数
       scanf("%s", st1);
       if (feof(stdin)) break;
       printf("%s:\n", st1);
-      TCN = 0;
-      CCN = 0;
-      continue;
+      TCN = 0; // 总数目
+      CCN = 0; // 正确的数目
+      continue; //跳过：这一行
     }
+
+    // 读取四个word
     if (!strcmp(st1, "EXIT")) break;
     scanf("%s", st2);
     for (a = 0; a < strlen(st2); a++) st2[a] = toupper(st2[a]);
@@ -95,22 +107,32 @@ int main(int argc, char **argv)
     for (a = 0; a<strlen(st3); a++) st3[a] = toupper(st3[a]);
     scanf("%s", st4);
     for (a = 0; a < strlen(st4); a++) st4[a] = toupper(st4[a]);
-    for (b = 0; b < words; b++) if (!strcmp(&vocab[b * max_w], st1)) break;
+
+    // 在词典中查找四个word，顺序查找
+    // 这里会频繁查找，为什么不采用hash？词典很大的时候会很慢
+    for (b = 0; b < words; b++) if (!strcmp(&vocab[b * max_w], st1)) break;  //等价于 strcmp(vocab+b * max_w, st1)
     b1 = b;
     for (b = 0; b < words; b++) if (!strcmp(&vocab[b * max_w], st2)) break;
     b2 = b;
     for (b = 0; b < words; b++) if (!strcmp(&vocab[b * max_w], st3)) break;
     b3 = b;
+
+    //
     for (a = 0; a < N; a++) bestd[a] = 0;
     for (a = 0; a < N; a++) bestw[a][0] = 0;
     TQ++;
+    // 判断 词典中找不到该单词
     if (b1 == words) continue;
     if (b2 == words) continue;
     if (b3 == words) continue;
-    for (b = 0; b < words; b++) if (!strcmp(&vocab[b * max_w], st4)) break;
+    for (b = 0; b < words; b++) if (!strcmp(&vocab[b * max_w], st4)) break;  //为什么这么个顺序，不把1234放一块？
     if (b == words) continue;
+
+    // 计算 vec=2-1+3 （理论上应该近似等于4）
     for (a = 0; a < size; a++) vec[a] = (M[a + b2 * size] - M[a + b1 * size]) + M[a + b3 * size];
     TQS++;
+
+    // 找到与vec最top-N近的word，存储到bestw
     for (c = 0; c < words; c++) {
       if (c == b1) continue;
       if (c == b2) continue;
@@ -129,6 +151,7 @@ int main(int argc, char **argv)
         }
       }
     }
+    // 对比st4和bestw[0]
     if (!strcmp(st4, bestw[0])) {
       CCN++;
       CACN++;
